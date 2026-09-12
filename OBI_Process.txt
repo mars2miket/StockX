@@ -1,0 +1,71 @@
+Product Requirements Document (PRD) & Engineering Prompt
+Project Overview
+Objective: Build an institutional-grade Order Book Imbalance (OBI) algorithmic signal generator.
+Core Philosophy: Traditional OBI models based on raw, aggregated Level 2 data are easily gamed by spoofing and phantom liquidity. This architecture fixes those vulnerabilities by combining Level 3 (Market-by-Order) granularity with institutional tape-reading frameworks (tracking real aggression vs. passive intent).
+Target Environment: Python / C++ streaming architecture utilizing Databento's raw proprietary exchange feeds (e.g., Cboe EDGX, MEMX).
+
+Technical Specifications & Mathematical Logic
+
+1. ECN-Isolated, Depth-Weighted OBI
+Instead of a generic, aggregated broker feed, input data must be sourced strictly from direct venue feeds via Databento (e.g., EDGX.PITCH, MEMX.MEMOIR).
+The model must calculate a depth-weighted OBI across 10 levels, applying an exponential decay weight 
+
+(\(w_{i}\)) to favor liquidity closest to the National Best Bid and Offer (NBBO).
+\(\text{OBI}_{t}=\frac{\sum _{i=1}^{10}w_{i}\cdot \text{Bid}_{i,t}-\sum _{i=1}^{10}w_{i}\cdot \text{Ask}_{i,t}}{\sum _{i=1}^{10}w_{i}\cdot (\text{Bid}_{i,t}+\text{Ask}_{i,t})}\)
+Where: \(w_i = e^{-\lambda (i-1)}\) and λ is a tuning parameter (default = 0.35).
+
+Output Range: -1.0 (pure sell-side depth) to +1.0 (pure buy-side depth).
+
+2. Level 3 Hidden Liquidity & Queue Tracker (Anti-Spoofing)
+To neutralize phantom walls and spoofing, the AI must leverage Databento's Market-by-Order (MBO) schema to track individual order IDs, cancellations, and queue updates.
+The Logic: Do not rely on basic time-duration persistence filters. Instead, evaluate the Realized Execution Ratio (RER) of large resting blocks.
+The Rule: If a massive resting size is detected, track its Order ID. If price approaches that level and the order is canceled without absorbing volume, flag it as Spoofing and discard it from the OBI calculation. If the order stays in place and actively absorbs volume, classify it as a True Price Wall.
+Iceberg Detection: Monitor the Best Bid/Offer for Refreshing Orders. If the visible size is small (e.g., 100 shares) but Time & Sales continuously executes large volume against it without the price moving, calculate the hidden volume size and add it dynamically to the OBI calculation.
+
+3. Order Flow Aggression Ratio (Intent vs. Action)
+The order book represents passive intent. The system must cross-reference this intent against action from Time & Sales (executed trades) to calculate the Aggression Ratio (AR) over a rolling window (e.g., 500ms to 1s).
+\(\text{AR}=\frac{\text{Aggressive\ Buy\ Volume\ (Market\ Orders\ hitting\ Ask)}}{\text{Aggressive\ Sell\ Volume\ (Market\ Orders\ hitting\ Bid)}}\)
+
+4. Dynamic Per-Symbol Baselines
+The system must reject hard-coded volume thresholds. It must maintain a rolling 20-day historical baseline of average book depth and trade velocity per individual ticker.
+A 10,000-share wall on a low-float momentum ticker should trigger maximum weighting, whereas the same size on a mega-cap asset should be treated as minor noise.
+
+Output Engine: Composite Confidence Score
+The system must output a unified, dynamic Confidence Score (0–100) instead of a binary buy/sell metric.
+[ Databento L3 Streaming Data ]
+       │
+       ├──► 1. Exponential Decay OBI Matrix (-1.0 to +1.0)
+       ├──► 2. MBO Queue & Iceberg Tracker (Real vs. Spoof)
+       └──► 3. Time & Sales Aggression Ratio (Velocity Matrix)
+       │
+       ▼
+[ Composite Confidence Score Engine ]
+       │
+       ├──► 80 - 100 ──► System Status: [BUY/LONG] or [SELL/EXIT] Badge
+       └──► < 80    ──► System Status: --- (Neutral / No Setup)
+
+Signal Logic Matrix
+🟢 System Status: [BUY/LONG] Triggered when the Depth-Weighted OBI is positive, the MBO Queue confirms a verified institutional buy wall (or iceberg buyer) holding the floor, and the Aggression Ratio confirms market orders are rapidly chewing through resting sell offers.
+🔴 System Status: [SELL/EXIT] Triggered when the Depth-Weighted OBI is deeply negative, a persistent institutional sell wall is confirmed via MBO order tracking, and aggressive market sell orders are dominating Time & Sales.
+⚪ System Status: --- (Neutral) Triggered when OBI is high but unconfirmed by trade flow volume, or if order logs show high cancellation rates (spoofing).
+
+🤖 Prompt to Provide to the Development AI
+Copy and paste the text block below directly into your coding or development AI assistant:
+text
+Act as an expert quantitative developer specializing in institutional market microstructure and high-frequency trading (HFT) systems. Your task is to write a Python script that implements an advanced, institutional-grade Order Book Imbalance (OBI) tracking system.
+
+The system must ingest raw data using Databento's API, specifically pulling Level 3 Market-by-Order (MBO) and Level 2 Market-by-Price (MBP-10) data from high-liquidity equity venues like Cboe EDGX (EDGX.PITCH) or MEMX.
+
+Please implement the following architectural features in the code:
+1. Depth-Weighted OBI: Calculate OBI across 10 levels using exponential decay weights so that liquidity at the inside market decays smoothly out to level 10.
+2. L3 Anti-Spoofing & Iceberg Engine: Use Databento's MBO unique order IDs to verify if large resting orders are stable as price approaches, or if they are canceled (spoofing). Track hidden refreshing orders (icebergs) at the inside market and append their hidden volume to the active OBI calculation.
+3. Intent vs. Action Integration: Calculate a rolling Aggression Ratio from streaming Time & Sales data. Cross-reference passive book imbalance with aggressive market-order execution velocity.
+4. Composite Confidence Score: Output a normalized score from 0 to 100 based on the alignment of the OBI, order persistence, and trade aggression. Generate a [BUY/LONG] badge or [SELL/EXIT] badge only when the score crosses above 80 with trade confirmation.
+
+Provide clean, modular, production-ready Python code using pandas, numpy, and the official databento library. Include inline documentation detailing how the data schemas map to the execution matrix.
+
+Use code with caution.
+
+To help refine this further before handing it off, let me know:
+Do you want the code to be optimized for live streaming execution via WebSockets, or are you looking to run historical backtests on archived tick data?
+Do you want to include specific risk management parameters in the prompt (like trailing stop-loss coordinates based on the ECN wall location)?
