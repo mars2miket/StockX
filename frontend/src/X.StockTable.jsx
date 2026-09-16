@@ -1,5 +1,5 @@
-import { memo } from 'react';
-import { FLOAT_UNIT, MARKET_SESSIONS, STICKY_TH, NEWS_TYPE_COLOR } from './X.constants';
+import { memo, useEffect, useRef, useState } from 'react';
+import { BACKEND_URL, FLOAT_UNIT, MARKET_SESSIONS, MAX_CUSTOM_TICKERS, STICKY_TH } from './X.constants';
 
 
 // ============================================================
@@ -13,33 +13,46 @@ const SESSION_BADGE = {
 };
 
 // ============================================================
-// COLUMNS (RVOL REMOVED - merged into Volume)
+// SIGNAL BADGE
+// NOTE: DatabentoProvider.js (as written) only returns 'BUY' / 'SELL' / null.
+// There is no SPOOF TRAP detection logic in that file yet, so that state is
+// not reachable here - mapped in case it's added later.
+// ============================================================
+
+const SIGNAL_BADGE = {
+  BUY: { label: 'BUY / LONG', color: '#4ade80' },
+  SELL: { label: 'SELL / SHORT', color: '#f87171' },
+  SPOOF: { label: 'SPOOF TRAP / FREEZE', color: '#facc15' },
+};
+
+// ============================================================
+// COLUMNS - Market Alert only (Volume merged into RVOL-only,
+// Country/News removed per CR; OBI/OFI/Signal added per CR)
 // ============================================================
 
 const columns = [
   { key: 'ticker', label: 'Ticker' },
   { key: 'price', label: 'Price' },
   { key: 'changePercent', label: '%Chg' },
-  { key: 'volume', label: 'Volume / RVOL' },
+  { key: 'rvol', label: 'RVOL' },
   { key: 'float', label: 'Float (M)' },
-  { key: 'country', label: 'Country' },
+  { key: 'obi', label: 'OBI' },
+  { key: 'ofi', label: 'OFI' },
+  { key: 'signalStatus', label: 'Signal' },
 ];
 
 // ============================================================
 // FORMATTING HELPERS
 // ============================================================
 
-function formatVolume(volume) {
-  if (volume === null || volume === undefined) return '—';
-  if (volume >= 1_000_000_000) return (volume / 1_000_000_000).toFixed(1) + 'B';
-  if (volume >= 1_000_000) return (volume / 1_000_000).toFixed(1) + 'M';
-  if (volume >= 1_000) return (volume / 1_000).toFixed(1) + 'K';
-  return String(volume);
-}
-
 function formatFloat(float) {
   if (float === null || float === undefined) return '—';
   return (float / FLOAT_UNIT).toFixed(1);
+}
+
+function formatSignedNumber(n) {
+  if (n === null || n === undefined) return '—';
+  return n.toFixed(2);
 }
 
 // ============================================================
@@ -52,12 +65,90 @@ function StockTable({
   sortKey,
   sortDir,
   onSort,
-  filters,
   loading,
   theme,
   themeMode,
   isControlsTab = false,
+  onAddTicker,
+  onRemoveTicker,
+  customTickers = [],
 }) {
+  // ---- Add-ticker search modal (Market Alert only) ----
+  const [showSearch, setShowSearch] = useState(false);
+  const [query, setQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState('');
+  const inputRef = useRef(null);
+  const debounceRef = useRef(null);
+
+  useEffect(() => {
+    function handleKey(e) {
+      if (e.key === 'Escape') closeSearch();
+    }
+    if (showSearch) document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [showSearch]);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!query || query.trim().length < 1) {
+      setSearchResults([]);
+      return;
+    }
+    setSearching(true);
+    debounceRef.current = setTimeout(() => {
+      fetch(`${BACKEND_URL}/api/search?q=${encodeURIComponent(query.trim())}`)
+        .then((res) => res.json())
+        .then((data) => {
+          setSearchResults(data.results || []);
+          setSearching(false);
+        })
+        .catch(() => {
+          setSearchResults([]);
+          setSearching(false);
+        });
+    }, 250);
+    return () => clearTimeout(debounceRef.current);
+  }, [query]);
+
+  function openSearch() {
+    setShowSearch(true);
+    setQuery('');
+    setSearchResults([]);
+    setAddError('');
+  }
+
+  function closeSearch() {
+    setShowSearch(false);
+    setQuery('');
+    setSearchResults([]);
+    setAddError('');
+  }
+
+  async function handleSelectResult(symbol) {
+    if (customTickers.includes(symbol)) {
+      setAddError('Ticker already in the list');
+      return;
+    }
+    if (customTickers.length >= MAX_CUSTOM_TICKERS) {
+      setAddError(`Maximum of ${MAX_CUSTOM_TICKERS} tickers reached`);
+      return;
+    }
+    setAdding(true);
+    setAddError('');
+    const ok = await onAddTicker(symbol);
+    setAdding(false);
+    if (ok) {
+      setQuery('');
+      setSearchResults([]);
+      inputRef.current?.focus();
+    } else {
+      setAddError(`Couldn't load data for ${symbol}`);
+    }
+  }
+
   // ---- Filter Logic ----
   const filteredRows = stocks
     .filter((s) => {
@@ -70,16 +161,6 @@ function StockTable({
       } else {
         if (s.session !== sessionKey) return false;
       }
-
-      // Price filter
-      if (filters.priceMin !== null && s.price < filters.priceMin) return false;
-      if (filters.priceMax !== null && s.price > filters.priceMax) return false;
-
-      // %Chg filter
-      if (filters.changeMin !== null && (s.changePercent === null || s.changePercent < filters.changeMin)) return false;
-
-      // Float filter
-      if (filters.floatMax !== null && (s.float === null || s.float / FLOAT_UNIT > filters.floatMax)) return false;
 
       return true;
     })
@@ -103,41 +184,32 @@ function StockTable({
   // ============================================================
 
   return (
+    <>
     <div
       style={{
         borderRadius: '12px',
-        border: `1px solid ${theme.border}`,
-        minHeight: '500px',
+        borderTop: `1px solid ${theme.border}`,
+        borderBottom: `1px solid ${theme.border}`,
+        width: '100%',
         overflow: 'visible',
         transition: 'border-color 0.3s ease, background 0.3s ease',
       }}
     >
-<table
-  style={{
-    borderCollapse: 'separate',
-    borderSpacing: 0,
-    width: '100%',
-    minWidth: '900px',
-    tableLayout: 'fixed',
-    background: theme.tableBg,
-    color: theme.text,
-    transition: 'background 0.3s ease, color 0.3s ease',
-  }}
->
-        <colgroup>
-          <col style={{ width: '9%' }} />
-          <col style={{ width: '8%' }} />
-          <col style={{ width: '8%' }} />
-          <col style={{ width: '14%' }} />
-          <col style={{ width: '11%' }} />
-          <col style={{ width: '10%' }} />
-          <col style={{ width: '40%' }} />
-        </colgroup>
-
+      <table /* table below filter controls of Market Alert*/
+        style={{
+          borderCollapse: 'separate',
+          borderSpacing: 0,
+          width: '100%',
+          tableLayout: 'auto',
+          background: theme.tableBg,
+          color: theme.text,
+          transition: 'background 0.3s ease, color 0.3s ease',
+        }}
+      >
         {/* ====== THEAD ====== */}
         <thead>
           <tr style={{ background: theme.surfaceAlt }}>
-            {columns.map((col) => (
+            {columns.map((col, i) => (
               <th
                 key={col.key}
                 onClick={() => onSort(col.key)}
@@ -152,27 +224,56 @@ function StockTable({
                   cursor: 'pointer',
                   userSelect: 'none',
                   whiteSpace: 'nowrap',
-                  borderRight: `1px solid ${theme.border}`,
+                  borderRight: i < columns.length - 1 ? `1px solid ${theme.border}` : 'none',
                   transition: 'color 0.3s ease, background 0.3s ease, border-color 0.3s ease',
                 }}
               >
-                {col.label} {sortKey === col.key ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                {col.key === 'ticker' ? (
+                  <span
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '1px',
+                    }}
+                  >
+                    <span>
+                      {col.label} {sortKey === col.key ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                    </span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openSearch();
+                      }}
+                      title="Add symbol"
+                      style={{
+                        background: 'transparent',
+                        border: `1px solid ${theme.accent}`,
+                        color: theme.accent,
+                        borderRadius: '4px',
+                        width: '22px',
+                        height: '22px',
+                        fontSize: '16px',
+                        lineHeight: '1',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: 0,
+                        flexShrink: 0,
+                        transition: 'border-color 0.3s ease, color 0.3s ease',
+                      }}
+                    >
+                      +
+                    </button>
+                  </span>
+                ) : (
+                  <>
+                    {col.label} {sortKey === col.key ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                  </>
+                )}
               </th>
             ))}
-            <th
-              style={{
-                ...stickyTh,
-                padding: '10px 10px',
-                color: theme.accent,
-                fontSize: '13px',
-                letterSpacing: '0.03em',
-                textTransform: 'uppercase',
-                whiteSpace: 'nowrap',
-                transition: 'color 0.3s ease, background 0.3s ease',
-              }}
-            >
-              News
-            </th>
           </tr>
         </thead>
 
@@ -180,17 +281,17 @@ function StockTable({
         <tbody>
           {filteredRows.length === 0 ? (
             <tr>
-              <td colSpan={7} style={{ padding: '48px', textAlign: 'center', color: theme.textMuted }}>
-                {loading ? 'Loading scanner data...' : 'No stocks match your filters.'}
+              <td colSpan={columns.length} style={{ padding: '48px', textAlign: 'center', color: theme.textMuted }}>
+                {loading ? 'Loading scanner data...' : 'No stocks to display.'}
               </td>
             </tr>
           ) : (
             filteredRows.map((s, i) => {
               const isEven = i % 2 === 0;
               const rowBg = isEven ? theme.stripeEven : theme.stripeOdd;
+              const signalBadge = s.signalStatus ? SIGNAL_BADGE[s.signalStatus] : null;
 
               return (
-// Inside the filteredRows.map loop inside the <tbody>:
                 <tr
                   key={s.ticker}
                   style={{
@@ -210,6 +311,27 @@ function StockTable({
                     }}
                   >
                     <span title={s.companyName || ''}>{s.ticker}</span>
+                    {customTickers.includes(s.ticker) ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRemoveTicker && onRemoveTicker(s.ticker);
+                        }}
+                        title="Remove"
+                        style={{
+                          marginLeft: '4px',
+                          background: 'transparent',
+                          border: 'none',
+                          color: theme.textMuted,
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          lineHeight: 1,
+                          padding: '0 2px',
+                        }}
+                      >
+                        ✕
+                      </button>
+                    ) : null}
                     {sessionKey === 'MARKET_ALERT' && SESSION_BADGE[s.session] ? (
                       <span
                         style={{
@@ -256,7 +378,7 @@ function StockTable({
                     {s.changePercent?.toFixed(2)}%
                   </td>
 
-                  {/* Volume / RVOL (merged) */}
+                  {/* RVOL */}
                   <td
                     style={{
                       padding: '6px 10px',
@@ -266,10 +388,7 @@ function StockTable({
                       borderBottom: `1px solid ${theme.border}`,
                     }}
                   >
-                    <div>Vol: {formatVolume(s.volume)}</div>
-                    <div style={{ fontSize: '11px', color: theme.textMuted }}>
-                      RVOL: {s.rvol !== null ? `${s.rvol}x` : '—'}
-                    </div>
+                    {s.rvol !== null ? `${s.rvol}x` : '—'}
                   </td>
 
                   {/* Float */}
@@ -285,45 +404,57 @@ function StockTable({
                     {formatFloat(s.float)}
                   </td>
 
-                  {/* Country */}
+                  {/* OBI */}
                   <td
                     style={{
                       padding: '6px 10px',
                       fontSize: '13px',
                       whiteSpace: 'nowrap',
+                      color: s.obi > 0 ? theme.accent : s.obi < 0 ? theme.accentDanger : theme.text,
                       borderRight: `1px solid ${theme.border}`,
                       borderBottom: `1px solid ${theme.border}`,
                     }}
                   >
-                    {s.country || '—'}
+                    {formatSignedNumber(s.obi)}
                   </td>
 
-                  {/* News */}
-                  <td style={{ padding: '6px 10px', fontSize: '13px', borderBottom: `1px solid ${theme.border}` }}>
-                    {s.headline ? (
-                      <span>
-                        <a
-                          href={s.articleUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title={s.headline}
-                          style={{ color: theme.accentBlue, textDecoration: 'none' }}
-                        >
-                          {s.headline.length > 40 ? s.headline.slice(0, 40) + '...' : s.headline}
-                        </a>
-                        <br />
-                        <small style={{ color: theme.accentDanger }}>
-                          {s.publishedAt ? new Date(s.publishedAt).toLocaleString() : ''}
-                          {s.newsType ? (
-                            <span style={{ color: NEWS_TYPE_COLOR[s.newsType] || theme.textMuted }}>
-                              {' · '}
-                              {s.newsType}
-                            </span>
-                          ) : null}
-                        </small>
+                  {/* OFI Flow - not yet computed by DatabentoProvider.js */}
+                  <td
+                    style={{
+                      padding: '6px 10px',
+                      fontSize: '13px',
+                      whiteSpace: 'nowrap',
+                      color: theme.textMuted,
+                      borderRight: `1px solid ${theme.border}`,
+                      borderBottom: `1px solid ${theme.border}`,
+                    }}
+                  >
+                    {formatSignedNumber(s.ofi)}
+                  </td>
+
+                  {/* Signal */}
+                  <td
+                    style={{
+                      padding: '6px 10px',
+                      fontSize: '12px',
+                      whiteSpace: 'nowrap',
+                      borderBottom: `1px solid ${theme.border}`,
+                    }}
+                  >
+                    {signalBadge ? (
+                      <span
+                        style={{
+                          fontWeight: 700,
+                          color: signalBadge.color,
+                          border: `1px solid ${signalBadge.color}`,
+                          borderRadius: '4px',
+                          padding: '1px 6px',
+                        }}
+                      >
+                        {signalBadge.label}
                       </span>
                     ) : (
-                      <span style={{ color: theme.textMuted }}>No recent news</span>
+                      <span style={{ color: theme.textMuted }}>NO SIGNAL / HOLD</span>
                     )}
                   </td>
                 </tr>
@@ -333,6 +464,154 @@ function StockTable({
         </tbody>
       </table>
     </div>
+
+    {/* ====== SEARCH MODAL ====== */}
+    {showSearch && (
+      <div
+        onClick={closeSearch}
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          background: theme.shadow,
+          zIndex: 200,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transition: 'background 0.3s ease',
+        }}
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            width: '360px',
+            maxWidth: '90vw',
+            background: theme.surface,
+            border: `1px solid ${theme.border}`,
+            borderRadius: '12px',
+            boxShadow: `0 20px 50px ${theme.shadow}`,
+            overflow: 'hidden',
+            transition: 'background 0.3s ease, border-color 0.3s ease',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '14px 16px',
+              borderBottom: `1px solid ${theme.border}`,
+            }}
+          >
+            <span style={{ fontSize: '15px', fontWeight: 600, color: theme.text }}>
+              Add symbol
+            </span>
+            <button
+              onClick={closeSearch}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: theme.textMuted,
+                fontSize: '18px',
+                cursor: 'pointer',
+                lineHeight: 1,
+                padding: '4px',
+              }}
+            >
+              ✕
+            </button>
+          </div>
+
+          <input
+            ref={inputRef}
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return;
+              e.preventDefault();
+              if (adding || searching || searchResults.length === 0) return;
+              handleSelectResult(searchResults[0].symbol);
+            }}
+            placeholder="Search ticker or company..."
+            autoFocus
+            style={{
+              width: '100%',
+              padding: '12px 16px',
+              fontSize: '14px',
+              background: theme.inputBg,
+              border: 'none',
+              borderBottom: `1px solid ${theme.border}`,
+              color: theme.text,
+              outline: 'none',
+              boxSizing: 'border-box',
+              transition: 'background 0.3s ease, color 0.3s ease, border-color 0.3s ease',
+            }}
+          />
+
+          {addError && (
+            <p style={{ color: theme.accentDanger, fontSize: '12px', margin: '10px 16px 0 16px' }}>
+              {addError}
+            </p>
+          )}
+
+          <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
+            {adding ? (
+              <p style={{ padding: '14px 16px', color: theme.textMuted, fontSize: '13px', margin: 0 }}>
+                Adding...
+              </p>
+            ) : searching ? (
+              <p style={{ padding: '14px 16px', color: theme.textMuted, fontSize: '13px', margin: 0 }}>
+                Searching...
+              </p>
+            ) : query && searchResults.length === 0 ? (
+              <p style={{ padding: '14px 16px', color: theme.textMuted, fontSize: '13px', margin: 0 }}>
+                No matches
+              </p>
+            ) : (
+              searchResults.map((r) => (
+                <div
+                  key={r.symbol}
+                  onClick={() => handleSelectResult(r.symbol)}
+                  style={{
+                    padding: '10px 16px',
+                    cursor: 'pointer',
+                    borderBottom: `1px solid ${theme.border}`,
+                    transition: 'background 0.2s ease',
+                  }}
+                  onMouseEnter={(ev) => (ev.currentTarget.style.background = theme.surfaceAlt)}
+                  onMouseLeave={(ev) => (ev.currentTarget.style.background = 'transparent')}
+                >
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: theme.text }}>
+                    {r.symbol}
+                    {r.exchange && (
+                      <span style={{ color: theme.textMuted, fontWeight: 400 }}>
+                        {' · '}
+                        {r.exchange}
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: '12px',
+                      color: theme.textMuted,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {r.name}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
@@ -347,7 +626,6 @@ function stocksAreEqual(prevProps, nextProps) {
     prevProps.sortDir === nextProps.sortDir &&
     prevProps.loading === nextProps.loading &&
     prevProps.isControlsTab === nextProps.isControlsTab &&
-    JSON.stringify(prevProps.filters) === JSON.stringify(nextProps.filters) &&
     JSON.stringify(prevProps.stocks) === JSON.stringify(nextProps.stocks)
   );
 }

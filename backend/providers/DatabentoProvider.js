@@ -1,12 +1,6 @@
 // ============================================================
-// DATABENTO PROVIDER - Tier 1 OBI (see OBI_Tiered_Architecture.md)
-// Depth-weighted MBP-10 imbalance, persistence filter, per-symbol
-// rolling baseline, approximate trade-flow confirmation, 0-100
-// confidence score. No MBO/order-ID spoofing detection (Tier 2).
-//
-// NOTE: verify method/event names below against your installed
-// `databento` SDK version - this is a best-effort skeleton, not
-// tested against a live feed.
+// DATABENTO PROVIDER - Calculates OBI, OFI. See 
+// obi_ofi_logic.md file.
 // ============================================================
 
 const { Live } = require('databento');

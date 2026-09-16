@@ -10,26 +10,39 @@ const earningsColumns = [
   { key: 'expectedDate', label: 'Earnings' },
   { key: 'price', label: 'Price' },
   { key: 'changePercent', label: '%Chg' },
-  { key: 'volume', label: 'Volume / RVOL' },
+  { key: 'rvol', label: 'RVOL' },
   { key: 'float', label: 'Float (M)' },
-  { key: 'country', label: 'Country' },
+  { key: 'obi', label: 'OBI' },
+  { key: 'ofi', label: 'OFI' },
+  { key: 'signalStatus', label: 'Signal' },
 ];
+
+
+
+// ============================================================
+// SIGNAL BADGE
+// NOTE: DatabentoProvider.js (as written) only returns 'BUY' / 'SELL' / null.
+// There is no SPOOF TRAP detection logic in that file yet.
+// ============================================================
+
+const SIGNAL_BADGE = {
+  BUY: { label: 'BUY / LONG', color: '#4ade80' },
+  SELL: { label: 'SELL / SHORT', color: '#f87171' },
+  SPOOF: { label: 'SPOOF TRAP / FREEZE', color: '#facc15' },
+};
 
 // ============================================================
 // FORMATTING HELPERS
 // ============================================================
 
-function formatVolume(volume) {
-  if (volume === null || volume === undefined) return '—';
-  if (volume >= 1_000_000_000) return (volume / 1_000_000_000).toFixed(1) + 'B';
-  if (volume >= 1_000_000) return (volume / 1_000_000).toFixed(1) + 'M';
-  if (volume >= 1_000) return (volume / 1_000).toFixed(1) + 'K';
-  return String(volume);
-}
-
 function formatFloat(float) {
   if (float === null || float === undefined) return '—';
   return (float / 1_000_000).toFixed(1);
+}
+
+function formatSignedNumber(n) {
+  if (n === null || n === undefined) return '—';
+  return n.toFixed(2);
 }
 
 function daysUntil(dateStr) {
@@ -44,6 +57,7 @@ function daysUntil(dateStr) {
 // ============================================================
 
 export default function EarningsCalendar({
+//export default function WatchList({
   earnings,
   loadingCal,
   onAddTicker,
@@ -183,14 +197,16 @@ export default function EarningsCalendar({
           }}
         >
           <colgroup>
-            <col style={{ width: '10%' }} />   {/* Ticker */}
-            <col style={{ width: '10%' }} />   {/* Earnings Date */}
-            <col style={{ width: '8%' }} />   {/* Price */}
-            <col style={{ width: '8%' }} />   {/* %Chg */}            
-            <col style={{ width: '14%' }} />  {/* Volume / RVOL */}
-            <col style={{ width: '10%' }} />  {/* Float */}
-            <col style={{ width: '10%' }} />  {/* Country */}
-            <col style={{ width: '30%' }} />  {/* News */}
+            <col style={{ width: '9%' }} /> //ticker
+            <col style={{ width: '9%' }} /> //earnings
+            <col style={{ width: '7%' }} /> //price
+            <col style={{ width: '7%' }} /> //chg
+            <col style={{ width: '7%' }} /> //rvol
+            <col style={{ width: '9%' }} /> //float
+            <col style={{ width: '6%' }} /> //obi
+            <col style={{ width: '6%' }} /> //ofi
+            <col style={{ width: '12%' }} /> //signal
+            <col style={{ width: '28%' }} /> //news
           </colgroup>
 
           {/* ====== THEAD ====== */}
@@ -284,8 +300,8 @@ export default function EarningsCalendar({
           <tbody>
             {sorted.length === 0 ? (
               <tr>
-                <td colSpan={8} style={{ padding: '48px', textAlign: 'center', color: theme.textMuted }}>
-                  {loadingCal ? 'Loading earnings...' : 'Click + to add a ticker'}
+                <td colSpan={10} style={{ padding: '48px', textAlign: 'center', color: theme.textMuted }}>
+                  {loadingCal ? 'Loading...' : 'Click + to add a ticker'}
                 </td>
               </tr>
             ) : (
@@ -349,7 +365,7 @@ export default function EarningsCalendar({
                       </span>
                     </td>
 
-                    {/* Earnings Date */}
+                    {/* Earnings Call Date */}
                     <td
                       style={{
                         padding: '6px 10px',
@@ -389,7 +405,7 @@ export default function EarningsCalendar({
                       {e.changePercent != null ? `${e.changePercent.toFixed(2)}%` : 'N/A'}
                     </td>
 
-                    {/* Volume / RVOL (merged) */}
+                    {/* RVOL */}
                     <td
                       style={{
                         padding: '6px 10px',
@@ -398,10 +414,7 @@ export default function EarningsCalendar({
                         borderRight: `1px solid ${theme.border}`,
                       }}
                     >
-                      <div>Vol: {formatVolume(e.volume)}</div>
-                      <div style={{ fontSize: '11px', color: theme.textMuted }}>
-                        RVOL: {e.rvol != null ? `${e.rvol}x` : '—'}
-                      </div>
+                      {e.rvol != null ? `${e.rvol}x` : '—'}
                     </td>
 
                     {/* Float */}
@@ -416,16 +429,56 @@ export default function EarningsCalendar({
                       {formatFloat(e.float)}
                     </td>
 
-                    {/* Country */}
+                    {/* OBI */}
                     <td
                       style={{
                         padding: '6px 10px',
                         fontSize: '13px',
                         whiteSpace: 'nowrap',
+                        color: e.obi > 0 ? theme.accent : e.obi < 0 ? theme.accentDanger : theme.text,
                         borderRight: `1px solid ${theme.border}`,
                       }}
                     >
-                      {e.country || '—'}
+                      {formatSignedNumber(e.obi)}
+                    </td>
+
+                    {/* OFI Flow - not yet computed by DatabentoProvider.js */}
+                    <td
+                      style={{
+                        padding: '6px 10px',
+                        fontSize: '13px',
+                        whiteSpace: 'nowrap',
+                        color: theme.textMuted,
+                        borderRight: `1px solid ${theme.border}`,
+                      }}
+                    >
+                      {formatSignedNumber(e.ofi)}
+                    </td>
+
+                    {/* Signal */}
+                    <td
+                      style={{
+                        padding: '6px 10px',
+                        fontSize: '12px',
+                        whiteSpace: 'nowrap',
+                        borderRight: `1px solid ${theme.border}`,
+                      }}
+                    >
+                      {SIGNAL_BADGE[e.signalStatus] ? (
+                        <span
+                          style={{
+                            fontWeight: 700,
+                            color: SIGNAL_BADGE[e.signalStatus].color,
+                            border: `1px solid ${SIGNAL_BADGE[e.signalStatus].color}`,
+                            borderRadius: '4px',
+                            padding: '1px 6px',
+                          }}
+                        >
+                          {SIGNAL_BADGE[e.signalStatus].label}
+                        </span>
+                      ) : (
+                        <span style={{ color: theme.textMuted }}>NO SIGNAL / HOLD</span>
+                      )}
                     </td>
 
                     {/* News */}

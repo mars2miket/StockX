@@ -11,7 +11,31 @@ app.use(cors());
 const yahooProvider = require('./providers/YahooProvider');
 //const yahooProvider = require('./providers/MockProvider');
 const finnhubProvider = require('./providers/FinnhubProvider');
-const { meetsConditions } = require('./providers/scanFilters');
+//const { meetsConditions } = require('./providers/scanFilters');
+
+// ---- Databento live signals (OBI / SIGNAL) ----
+// NOTE: DatabentoProvider.js as written only computes OBI + a confidence-gated
+// signalStatus - there is no separate OFI (Order Flow Imbalance) calculation
+// in that file yet, despite OFI being named in the app summary. OFI FLOW is
+// left null/'-' below until that logic is added to DatabentoProvider.js.
+const latestSignals = new Map(); // ticker -> { obi, confidence, signalStatus }
+const subscribedTickers = new Set();
+let databentoProvider = { subscribe: () => {}, unsubscribe: () => {} }; // no-op fallback
+
+try {
+  databentoProvider = require('./providers/DatabentoProvider');
+  if (process.env.DATABENTO_API_KEY) {
+    databentoProvider.start((update) => {
+      latestSignals.set(update.ticker, update);
+    });
+  } else {
+    console.log('DATABENTO_API_KEY not set - OBI / SIGNAL columns will be empty.');
+  }
+} catch (e) {
+  // Most likely the 'databento' npm package isn't installed yet - don't let
+  // that take down the whole server (it did before this fix).
+  console.log('Databento provider unavailable, continuing without it:', e.message);
+}
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
@@ -19,8 +43,21 @@ app.get('/api/health', (req, res) => {
 
 app.get('/api/quote/:ticker', async (req, res) => {
   try {
-    const quote = await yahooProvider.getQuote(req.params.ticker);
-    res.json(quote);
+    const ticker = req.params.ticker.toUpperCase();
+    const quote = await yahooProvider.getQuote(ticker);
+
+    if (!subscribedTickers.has(ticker) && process.env.DATABENTO_API_KEY) {
+      databentoProvider.subscribe([ticker]);
+      subscribedTickers.add(ticker);
+    }
+    const signal = latestSignals.get(ticker);
+
+    res.json({
+      ...quote,
+      obi: signal ? signal.obi : null,
+      ofi: null,
+      signalStatus: signal ? signal.signalStatus : null,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -38,19 +75,24 @@ app.get('/api/profile/:ticker', async (req, res) => {
 app.get('/api/scan', async (req, res) => {
   try {
     const allQuotes = await yahooProvider.scanAll();
-    const qualifying = allQuotes.filter(meetsConditions);
+    const qualifying = allQuotes;
 
-    const enriched = [];
-    for (const stock of qualifying) {
-      try {
-        const withProfile = await yahooProvider.enrichWithProfile(stock);
-        const news = await finnhubProvider.getNews(stock.ticker);
-        enriched.push({ ...withProfile, ...news });
-      } catch (e) {
-        console.log(`Error enriching ${stock.ticker}:`, e.message);
-        enriched.push({ ...stock, sector: 'Unknown', country: 'Unknown', headline: null, publishedAt: null, articleUrl: null, newsType: null });
-      }
+    // Subscribe any newly-qualifying tickers to the live Databento feed
+    const newTickers = qualifying.map(s => s.ticker).filter(t => !subscribedTickers.has(t));
+    if (newTickers.length && process.env.DATABENTO_API_KEY) {
+      databentoProvider.subscribe(newTickers);
+      newTickers.forEach(t => subscribedTickers.add(t));
     }
+
+    const enriched = qualifying.map((stock) => {
+      const signal = latestSignals.get(stock.ticker);
+      return {
+        ...stock,
+        obi: signal ? signal.obi : null,
+        ofi: null, // not yet computed - see note near databentoProvider.start above
+        signalStatus: signal ? signal.signalStatus : null,
+      };
+    });
 
     res.json({ total: allQuotes.length, qualifying: enriched });
   } catch (err) {
@@ -80,14 +122,28 @@ app.get('/api/earnings', async (req, res) => {
 
     const earningsList = await yahooProvider.getEarningsCalendar(extraTickers);
 
+    // Subscribe any newly-seen tickers to the live Databento feed
+    const newTickers = earningsList.map(s => s.ticker).filter(t => !subscribedTickers.has(t));
+    if (newTickers.length && process.env.DATABENTO_API_KEY) {
+      databentoProvider.subscribe(newTickers);
+      newTickers.forEach(t => subscribedTickers.add(t));
+    }
+
     const enriched = [];
     for (const stock of earningsList) {
       try {
         const news = await finnhubProvider.getNews(stock.ticker);
-        enriched.push({ ...stock, ...news });
+        const signal = latestSignals.get(stock.ticker);
+        enriched.push({
+          ...stock,
+          ...news,
+          obi: signal ? signal.obi : null,
+          ofi: null, // not yet computed - see note near databentoProvider.start above
+          signalStatus: signal ? signal.signalStatus : null,
+        });
       } catch (e) {
         console.log(`Error fetching news for ${stock.ticker}:`, e.message);
-        enriched.push({ ...stock, headline: null, publishedAt: null, articleUrl: null, newsType: null });
+        enriched.push({ ...stock, headline: null, publishedAt: null, articleUrl: null, newsType: null, obi: null, ofi: null, signalStatus: null });
       }
     }
 

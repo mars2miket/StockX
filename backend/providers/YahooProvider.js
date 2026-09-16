@@ -1,6 +1,24 @@
 const YahooFinance = require('yahoo-finance2').default;
 const yahooFinance = new YahooFinance();
 
+// ticker -> { value, date }  (date = YYYY-MM-DD, refreshed once/day)
+const floatCache = new Map();
+
+async function getFloatCached(ticker) {
+  const today = new Date().toISOString().split('T')[0];
+  const cached = floatCache.get(ticker);
+  if (cached && cached.date === today) return cached.value;
+
+  let value = cached ? cached.value : null; // keep stale value on error rather than nulling out
+  try {
+    const stats = await yahooFinance.quoteSummary(ticker, { modules: ['defaultKeyStatistics'] });
+    value = stats.defaultKeyStatistics?.floatShares ?? value;
+  } catch (e) {}
+
+  floatCache.set(ticker, { value, date: today });
+  return value;
+}
+
 async function getScreenerTickers() {
   const result = await yahooFinance.screener({ scrIds: 'day_gainers', count: 50 });
   const sorted = result.quotes.sort((a, b) => b.regularMarketChangePercent - a.regularMarketChangePercent);
@@ -29,11 +47,7 @@ async function getQuote(ticker) {
   const rvol = avgVolume ? +(volume / avgVolume).toFixed(2) : null;
   const hod = quote.regularMarketDayHigh ?? quote.dayHigh ?? null;
 
-  let float = null;
-  try {
-    const stats = await yahooFinance.quoteSummary(ticker, { modules: ['defaultKeyStatistics'] });
-    float = stats.defaultKeyStatistics?.floatShares || null;
-  } catch (e) {}
+  const float = await getFloatCached(ticker);
 
   return {
     ticker: quote.symbol,
@@ -88,7 +102,7 @@ async function getEarningsCalendar(extraTickers = []) {
     try {
       const quote = await yahooFinance.quote(ticker);
       const summary = await yahooFinance.quoteSummary(ticker, {
-        modules: ['calendarEvents', 'assetProfile', 'defaultKeyStatistics'],
+        modules: ['calendarEvents', 'defaultKeyStatistics'],
       });
 
       const earningsDate = summary.calendarEvents?.earnings?.earningsDate?.[0] || null;
@@ -108,8 +122,6 @@ async function getEarningsCalendar(extraTickers = []) {
         avgVolume,
         rvol,
         float,
-        sector: summary.assetProfile?.sector || 'N/A',
-        country: summary.assetProfile?.country || 'N/A',
       });
     } catch (e) {
       console.error(`Skipping ${ticker} for earnings calendar:`, e.message);
