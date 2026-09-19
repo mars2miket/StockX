@@ -20,7 +20,7 @@ StockX is a lightweight, responsive web-based analysis platform designed to trac
 * Processes incoming 10-level Market-By-Price (MBP-10) depth packets at a rigid **1,000ms clock speed**.
 * Computes two critical indicators every second:
   1. **Order Book Imbalance (OBI):** Measures resting snapshot depth asymmetry between the top 5 bid and ask layers (bounded between `-1.0` and `+1.0`).
-  2. **Order Flow Imbalance (OFI Flow):** Quantifies contract volume velocity based on sequential price layer updates.
+  2. **Volume-Weighted Trend Indicator (VWTI Flow):** tbd.
 
 ### 🚨 UI Text Signal Decision Matrix
 Current UI has OBI, OBI, & SIGNAL columns as placeholders. Transforms complex microstructural volume flow into four highly distinct visual text labels per row:
@@ -46,7 +46,7 @@ stockx/
 ├── backend/
 │   ├── server.js                 ← Express routes (/api/scan, /api/earnings, /api/search)
 │   └── providers/
-│       ├── DatabentoProvider.js  ← not yet wired to calculate OBI, OFI
+│       ├── DatabentoProvider.js  ← not yet wired to calculate OBI, VWTI
 │       ├── YahooProvider.js      ← all Yahoo Finance calls (quotes, screener, profile, search)
 │       ├── FinnhubProvider.js `  ← news
 ├── frontend/src/
@@ -56,8 +56,11 @@ stockx/
 │   ├── X.EarningsCalendar.jsx    ← the Earnings Schedule tab (table + "Add symbol" modal)
 │   └── main.jsx                  ← app bootstrap only, rarely touched
 └── signals/
-    └── notifier.py               ← Windows toast/sound alerts (polls the backend independently) - this function is no longer used
+    └── notifier.py               ← Windows toast/sound alerts (polls the backend independently) - this function not in used
+    └── data_handler.py           ← Owns the live Databento connection (Node has no official SDK for this), computes OBI / VWTI / 
+                                    Signal  per tick, and serves the results to Node over a local WebSocket server.
 
+---
 
 ## 4. UI Components
 Watchlist
@@ -69,23 +72,56 @@ Watchlist
     RVOL - relative volume.
     FLOAT (M) - total float of shares in millions.
     OBI - data to be added (see OFE.md)
-    OFI - data to be added (see OFE.md)
+    VWTI - data to be added (see OFE.md)
     SIGNAL - data to be added (see OFE.md)
     NEWS - latest news release along w/the published date, time, & news type.
+  NOTE: the UI should not keep up w/Node's broadcast.
 
+---
 
 ## 5. File Roles
 /signals/notifier.py - has set intervals, checks for qualifying tickers, audible/visible Windows 11 alert when a ticker meets the conditions.
 /providers/YahooProvider.js - gives the Price, %Chg, ticker symbol, companyName, session (Pre, Regular, After Hours), volume, avgVolume, rvol, float, hod (high of day).
 /providers/FinnhubProvider.js - gives News, date of news, time of publishing.
 /providers/scanFilters.js - gives filter threshold parameters such as minChangePercent: 2, minRvol: 1, maxFloat: 500_000_000 stock shares. Filter conditions subject to change.
-/providers/DatabentoProvider.js - will provide L1, L2 data for OBI, OFI calculations. This feature is not yet connected to the API.
+/providers/DatabentoProvider.js - will provide L1, L2 data for OBI, VWTI calculations. This feature is not yet connected to the API.
 /frontend/src/X.App.jsx - the root components of the application.
 /frontend/src/X.constants.js - contains the sticky header styles.
 /frontend/src/X.EarningsCalendar.jsx - controls most of earnings calendar table data. The table contains TICKER, EARNINGS (date), PRICE, %CHG, VOLUME / RVOL, FLOAT (M), COUNTRY, NEWS. This list is a watchlist to track when earnings calls are scheduled for decision making purposes. 
 /frontend/src/main.jsx - import for the X.App.jsx file.
 /frontend/src/X.StockTable.jsx - controls how data is displayed in both tables (Market Alert & Earnings Schedule)
 
+---
 
-## 5. Basic process flow
-The app has a + symbol next to TICKER column header. User clicks to search for tickers, presses Enter or clicks on the desired ticker which is brought into the UI on Watchlist tab. Data for the company should be displayed as shown in #4 UI Components. It should show OBI, OFI & Signal data (see OFE.md)
+## 6. Basic process flow
+The app has a + symbol next to TICKER column header. User clicks to search for tickers, presses Enter or clicks on the desired ticker which is brought into the UI on Watchlist tab. Data for the company should be displayed as shown in #4 UI Components. Currently not connected is databento api to calculate OBI, VWTI & Signal data (see OFE.md)
+
+---
+
+## 7. Feature: Signal Accuracy Log
+
+Tracks whether BUY/SELL signals actually predict price movement — without
+needing any Databento historical data. Runs entirely on data the app
+already has (Databento price + live signals from `data_handler.py`).
+
+### How it works
+1. **Log on signal change only** — a new row is written only when a
+   ticker's signal *changes* (e.g. HOLD → BUY), not on every 1s tick it
+   stays the same. Keeps the log small (a few dozen rows/day even on an
+   active session).
+2. **Entry price captured** at the moment the signal fires (Yahoo quote).
+3. **Evaluation window** — after a configurable delay (`SIGNAL_EVAL_MINUTES`,
+   default 15 min), the price is checked again and the row is marked
+   `WIN` or `LOSS`:
+   - BUY wins if price is higher at eval time.
+   - SELL wins if price is lower at eval time.
+   - SPOOF TRAP is logged but never evaluated (it's a warning, not a
+     directional bet).
+
+### Storage
+SQLite file at `backend/signal_log.db` — single file, no server setup.
+Columns: `ticker, signal, fired_at, entry_price, eval_price, eval_at, outcome`.
+
+### Endpoints
+- `GET /api/signal-log` — recent raw rows (optional `?ticker=` filter)
+- `GET /api/signal-log/stats` — win/loss/pending counts grouped by signal type
