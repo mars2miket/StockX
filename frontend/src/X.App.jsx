@@ -164,7 +164,11 @@ function App() {
     }
   }
 
-  // ---- Earnings Fetching ----
+  // ---- Earnings Fetching (initial load only - runs once on mount) ----
+  // Adds/removes update `earnings` locally (see handleAddTicker /
+  // handleRemoveTicker below), so this does NOT re-run on every
+  // customTickers change - that was causing the whole table to
+  // visibly reload on every add/remove.
   useEffect(() => {
     if (customTickers.length === 0) {
       setLoadingCal(false);
@@ -177,7 +181,8 @@ function App() {
         setLoadingCal(false);
       })
       .catch(() => setLoadingCal(false));
-  }, [customTickers]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function persistCustomTickers(next) {
     setCustomTickers(next);
@@ -316,7 +321,7 @@ function App() {
 
       {/* ====== MAIN CONTENT ====== */}
       {activeTab === 'CALENDAR' ? (
-        <div style={{ padding: '0 32px' }}>
+        <div style={{ padding: 0 }}> {/* ◄ Changed '0 32px' to 0 */}
           <EarningsCalendar
             earnings={earnings}
             loadingCal={loadingCal}
@@ -328,7 +333,7 @@ function App() {
         </div>
       ) : (
         // ---- MARKET ALERT TAB ----
-        <div style={{ padding: '0 32px' }}>
+        <div style={{ padding: 0 }}> {/* ◄ Changed '0 32px' to 0 */}
           <StockTable
             stocks={stocks}
             sessionKey={activeTab}
