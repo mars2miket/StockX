@@ -1,0 +1,245 @@
+/**
+ * workspace-toggle.js — classic script.
+ * Manages the [Lists | Notes | Analytics] toggle and the dynamic dropdown below it.
+ */
+(function () {
+  'use strict';
+
+  var toggle, viewSelect, dashBtn;
+
+  function initWorkspaceToggle() {
+    toggle     = document.getElementById('seg-toggle');
+    viewSelect = document.getElementById('view-select');
+    dashBtn    = document.getElementById('dashboard-toggle');
+    if (!toggle || !viewSelect) return;
+
+    // Wire toggle buttons
+    toggle.querySelectorAll('.seg-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        setMode(btn.dataset.mode);
+      });
+    });
+
+    if (dashBtn) {
+      dashBtn.addEventListener('click', function () {
+        setMode('analytics');
+      });
+    }
+
+    // Wire the dropdown
+    viewSelect.addEventListener('change', onDropdownChange);
+
+    // Wire management buttons — route by viewMode
+    var mgmtNew    = document.getElementById('mgmt-new-btn');
+    var mgmtRename = document.getElementById('mgmt-rename-btn');
+    var mgmtDelete = document.getElementById('mgmt-delete-btn');
+
+    function runMgmt(action) {
+      var mode = window.getState().viewMode;
+      var actions = (mode === 'lists') ? window.listActions : window.noteActions;
+      if (actions && typeof actions[action] === 'function') {
+        actions[action]();
+      }
+    }
+
+    if (mgmtNew)    mgmtNew.addEventListener('click',    function () { runMgmt('create'); });
+    if (mgmtRename) mgmtRename.addEventListener('click', function () { runMgmt('rename'); });
+    if (mgmtDelete) mgmtDelete.addEventListener('click', function () { runMgmt('remove'); });
+
+    // Actions popup (⋯)
+    var menuBtn = document.getElementById('mgmt-menu-btn');
+    var menuGroup = document.getElementById('mgmt-group');
+    function closeMenu() {
+      if (!menuGroup) return;
+      menuGroup.classList.remove('open');
+      if (menuBtn) menuBtn.setAttribute('aria-expanded', 'false');
+    }
+    if (menuBtn && menuGroup) {
+      menuBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = menuGroup.classList.toggle('open');
+        menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      menuGroup.addEventListener('click', closeMenu);
+      document.addEventListener('click', function (e) {
+        if (!menuGroup.contains(e.target)) closeMenu();
+      });
+    }
+
+    // React to state changes
+    window.subscribe(function (state, prev) {
+      if (state.viewMode !== prev.viewMode) {
+        applyMode();
+      }
+      // Added state.lang check to force a dropdown update when language shifts
+      if (state.lists !== prev.lists
+       || state.activeList !== prev.activeList
+       || state.notes !== prev.notes
+       || state.activeNote !== prev.activeNote
+       || state.lang !== prev.lang) {
+        refreshDropdown();
+      }
+    });
+
+    // Initial render
+    applyMode();
+  }
+
+  // ─── Mode switching ──────────────────────────────────────────────────────
+  function setMode(mode) {
+    var state = window.getState();
+    if (state.viewMode === mode) return;
+
+    if (mode === 'analytics' && typeof window.stopSpeech === 'function' &&
+        (state.isSpeaking || state.isPaused)) {
+      window.stopSpeech();
+    }
+
+    // Save the current grid into its list before leaving Lists mode
+    if (state.viewMode === 'lists' && typeof window.serializeGrid === 'function') {
+      var lists = Object.assign({}, state.lists);
+      if (state.activeList) {
+        lists[state.activeList] = window.serializeGrid();
+        window.setState({ lists: lists });
+      }
+    }
+
+    // Sync noteActive flag and update state layout keys
+    if (mode === 'notes') {
+      var lastNote = state.activeNote;
+      var noteExists = lastNote && lastNote in state.notes;
+      var targetNote = noteExists ? lastNote : Object.keys(state.notes)[0];
+      window.setState({
+        viewMode: 'notes',
+        noteActive: !!targetNote,
+        activeNote: targetNote || null
+      });
+    } else if (mode === 'analytics') {
+      window.setState({
+        viewMode: 'analytics',
+        noteActive: false
+      });
+    } else {
+      window.setState({
+        viewMode: 'lists',
+        noteActive: false
+      });
+    }
+
+
+    applyMode();
+  }
+
+  function applyMode() {
+    var state = window.getState();
+    var mode = state.viewMode || 'lists';
+
+    // Set the view mode on the body element so CSS rules can hide/show containers
+    document.body.setAttribute('data-view-mode', mode);
+
+    // Toggle active state on the segmented layout buttons
+    toggle.querySelectorAll('.seg-btn').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.mode === mode);
+    });
+    if (dashBtn) dashBtn.classList.toggle('active', mode === 'analytics');
+
+
+    // Refresh dropdown options only if we are browsing structured content tiers
+    if (mode !== 'analytics') {
+      refreshDropdown();
+    }
+
+    // Refresh char count for the current view
+    if (typeof window.updateCharCount === 'function') window.updateCharCount();
+  }
+
+  // ─── Dropdown ────────────────────────────────────────────────────────────
+  function refreshDropdown() {
+    var state = window.getState();
+    var mode = state.viewMode || 'lists';
+
+    if (!viewSelect) return;
+    viewSelect.innerHTML = '';
+
+    if (mode === 'lists') {
+      var listNames = Object.keys(state.lists || {});
+      listNames.forEach(function (name) {
+        var op = document.createElement('option');
+        op.value = name;
+        
+        if (name === 'Untitled List' || name === '__DEFAULT_LIST__') {
+          op.textContent = (window.__i18n__ && window.__i18n__.t) ? window.__i18n__.t('dropdownLists') : 'Untitled List';
+        } else if (name === '__MISSED_QUESTIONS__') {
+          op.textContent = (window.__i18n__ && window.__i18n__.t) ? window.__i18n__.t('missedListName') : 'Missed Questions';
+        } else {
+          op.textContent = name;
+        }
+        
+        viewSelect.appendChild(op);
+      });
+
+      viewSelect.value = state.activeList && state.activeList in state.lists
+        ? state.activeList
+        : (listNames[0] || '');
+
+    } else if (mode === 'notes') {
+      var noteNames = Object.keys(state.notes || {});
+      noteNames.forEach(function (name) {
+        var op = document.createElement('option');
+        op.value = name;
+        
+        if (name === 'Untitled Note' || name === '__DEFAULT_NOTE__') {
+          op.textContent = (window.__i18n__ && window.__i18n__.t) ? window.__i18n__.t('dropdownNotes') : 'Untitled Note';
+        } else if (name === '__TEST_RESULTS__') {
+          op.textContent = (window.__i18n__ && window.__i18n__.t) ? window.__i18n__.t('testResultsNote') : 'Test Results';
+        } else {
+          op.textContent = name;
+        }
+        
+        viewSelect.appendChild(op);
+      });
+
+      viewSelect.value = state.activeNote && state.activeNote in state.notes
+        ? state.activeNote
+        : (noteNames[0] || '');
+    }
+  }
+
+  function onDropdownChange() {
+    var name = viewSelect.value;
+    var state = window.getState();
+
+    if (state.viewMode === 'lists') {
+      if (!name || !(name in state.lists)) return;
+      if (name === state.activeList) return;
+
+      var lists = Object.assign({}, state.lists);
+      if (state.activeList) {
+        lists[state.activeList] = window.serializeGrid();
+      }
+
+      window.setState({
+        lists: lists,
+        activeList: name,
+        rows: window.parseList ? window.parseList(lists[name]) : []
+      });
+
+      if (typeof window.__gridRerender__ === 'function') window.__gridRerender__();
+      if (typeof window.updateCharCount === 'function') window.updateCharCount();
+      if (typeof window.syncStartTestButton === 'function') window.syncStartTestButton();
+
+    } else if (state.viewMode === 'notes') {
+      if (!name || !(name in state.notes)) return;
+
+      window.setState({
+        noteActive: true,
+        activeNote: name
+      });
+
+      var noteArea = document.getElementById('note-area');
+      if (noteArea) noteArea.value = state.notes[name] || '';
+    }
+  }
+
+  window.initWorkspaceToggle = initWorkspaceToggle;
+})();
