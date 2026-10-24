@@ -1,0 +1,211 @@
+/* ==========================================================================
+   SHARED (all screen sizes)
+   ========================================================================== */
+
+
+
+/* Bottom playback bar — horizontal row, always visible */
+.mobile-playback-bar {
+  display: flex !important;
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-around;
+  width: 100%;
+  height: 56px;
+  padding: 0 8px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-color);
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.06);
+  box-sizing: border-box;
+  gap: 4px;
+  z-index: 30;
+}
+
+.mobile-playback-bar .pb-btn { width: 44px; height: 44px; flex: 0 0 auto; }
+.mobile-playback-bar .pb-btn svg { width: 22px; height: 22px; }
+.mobile-playback-bar .play-pause svg { width: 20px; height: 20px; }
+
+/* Popups opened by #m-menu-btn */
+.mobile-popup {
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  position: fixed;
+  right: 12px;
+  bottom: 64px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  padding: 6px;
+  z-index: 40;
+  min-width: 130px;
+}
+
+.mobile-popup.visible { display: flex; }
+
+.mobile-popup-item {
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  font-size: 15px;
+  border-radius: 6px;
+  min-height: 40px;
+  cursor: pointer;
+}
+
+.mobile-popup-item:hover,
+.mobile-popup-item:active { background: var(--accent-soft); }
+
+/* Desktop sidebar popups (#dt-menu-popup, #dt-speed-popup) */
+.mobile-popup.dt-popup {
+  display: none !important;
+  position: absolute;
+  right: 0;
+  top: calc(100% - 78px) !important;
+  bottom: auto !important;
+  max-height: 200px !important;
+  overflow-y: auto !important;
+  z-index: 200;
+  min-width: 100px;
+}
+
+/* ==========================================================================
+   WIDE SCREEN (≥701px)
+   ========================================================================== */
+@media (min-width: 701px) {
+
+  .exam-body.mode-choice,
+  .exam-body.mode-select,
+  .exam-body.mode-tf {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .exam-body.mode-select > p,
+  .exam-body.mode-tf > p,
+  .exam-body.mode-tf > .tf-statement {
+    grid-column: 1 / -1;
+    margin: 0;
+  }
+
+  .exam-body.mode-choice .exam-choice,
+  .exam-body.mode-select .exam-check,
+  .exam-body.mode-tf .exam-choice {
+    margin-bottom: 0;
+  }
+
+  .playback-row { position: relative; }
+
+  .mobile-popup.dt-popup.visible { display: flex !important; }
+}
+
+/* ==========================================================================
+   MOBILE (≤700px) — grid is the scroller; header, footer and playback bar
+   are all in normal flex flow inside .app-shell, so they always sit at the
+   bottom of the visible viewport (no position:fixed quirks).
+   ========================================================================== */
+@media (max-width: 700px) {
+
+  .acc-section[data-acc="controls"] { display: none; }
+
+  #analytics-workspace {
+    overflow-x: hidden;
+    max-height: 60vh;
+  }
+
+  .top-sticky-bar {
+    height: 48px;
+    padding: 0 14px;
+  }
+
+  .top-sticky-bar .brand { font-size: 18px; }
+
+  .app-layout-container,
+  .sidebar-wrapper {
+    flex-direction: column;
+  }
+
+  .controls-sidebar {
+    width: 100% !important;
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 100%;
+    z-index: 15;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+    overflow-y: auto !important;
+    transition: height .35s var(--ease), border-bottom-width .35s var(--ease);
+  }
+
+  .sidebar-wrapper.collapsed .controls-sidebar {
+    width: 100%;
+    height: 0;
+    border-bottom-width: 0;
+  }
+
+  .sidebar-scrollable-content {
+    width: 100%;
+    min-width: 0;
+    padding: 12px;
+    height: auto;
+    min-height: 100%;
+    overflow-y: visible;
+  }
+
+  .input-workspace {
+    padding: 12px;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .hint-card {
+    max-height: 30vh;
+    overflow-y: auto;
+    flex-shrink: 0;
+    margin-bottom: 12px;
+  }
+
+  .spreadsheet-grid,
+  #spreadsheet-container.spreadsheet-grid {
+    flex: 1 1 0 !important;
+    min-height: 0 !important;
+    max-height: none;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .header-cell {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+
+  .grid-footer {
+    padding: 6px 0 4px;
+    flex-shrink: 0;
+    position: sticky;
+    bottom: 0;
+    background: var(--bg-app);
+    z-index: 5;
+  }
+
+  #note-area { width: 100%; min-width: 0; }
+
+  #recall-viewer.exam-active {
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+  }
+}
+
+.acc-section[data-acc="voices"] { display: none; }
