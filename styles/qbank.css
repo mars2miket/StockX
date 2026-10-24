@@ -48,4 +48,4 @@
 .modal-btn:disabled { opacity: .5; cursor: not-allowed; }
 
 /* Only offered for Lists */
-[data-view-mode="notes"] #qbank-open-btn { display: none; }
+/* [data-view-mode="notes"] #qbank-open-btn { display: none; } **use this if you want the QB to disappear when Notes clicked** */

@@ -1258,7 +1258,7 @@ button:hover {
 }
 
 
-.hint-show-btn {
+#hint-show-btn {
   width: 32px;
   height: 32px;
   flex-shrink: 0;
@@ -1275,9 +1275,9 @@ button:hover {
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
-.hint-show-btn:hover {
+#hint-show-btn:hover {
   background: var(--bg-surface);
-  border-color: var(--text-muted);
+  border-color: #4f46e5;
   color: var(--text-primary);
 }
 
@@ -1946,3 +1946,17 @@ input:focus {
   color: var(--text-muted);
 }
 
+#view-select { display: none; }
+.vs-dd { position: relative; flex: 1; min-width: 0; }
+.vs-btn { text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vs-list {
+  display: none; position: absolute; left: 0; right: 0; top: calc(100% + 4px);
+  max-height: 240px; overflow-y: auto; padding: 4px; z-index: 100;
+  background: var(--bg-surface-2); border: 1px solid var(--control-border);
+  border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.28);
+}
+.vs-list.open { display: block; }
+.vs-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+.vs-item:hover, .vs-item.active { background: var(--accent-soft); }
+.vs-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vs-edit { border: none; background: transparent; color: var(--text-primary); font-size: 16px; cursor: pointer; padding: 4px 8px; }

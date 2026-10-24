@@ -61,7 +61,7 @@
       btn.addEventListener('click', function () {
         scope.remove();
         window.storage.set('hintDismissed', true);
-        if (showBtn) showBtn.style.display = '';
+        if (showBtn) showBtn.style.display = ''; 
       });
     }
 
@@ -69,7 +69,7 @@
       var dismissed = !!window.storage.get('hintDismissed');
       var existing = document.getElementById('onboarding-hint');
 
-      if (showBtn) showBtn.style.display = dismissed ? '' : 'none';
+      //if (showBtn) showBtn.style.display = dismissed ? '' : 'none'; //removed the ? when clicked
 
       if (dismissed && existing) {
         existing.remove();
